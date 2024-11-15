@@ -7,6 +7,7 @@ import {
   dialog,
   globalShortcut,
   nativeTheme,
+  screen,
 } from 'electron';
 import {
   isWindows,
@@ -30,7 +31,8 @@ import { EventEmitter } from 'events';
 import express from 'express';
 import expressProxy from 'express-http-proxy';
 import Store from 'electron-store';
-import { createMpris } from '@/electron/mpris';
+import { createMpris, createDbus } from '@/electron/mpris';
+import { spawn } from 'child_process';
 const clc = require('cli-color');
 const log = text => {
   console.log(`${clc.blueBright('[background.js]')} ${text}`);
@@ -201,8 +203,42 @@ class Background {
     };
 
     if (this.store.get('window.x') && this.store.get('window.y')) {
-      options.x = this.store.get('window.x');
-      options.y = this.store.get('window.y');
+      let x = this.store.get('window.x');
+      let y = this.store.get('window.y');
+
+      let displays = screen.getAllDisplays();
+      let isResetWindiw = false;
+      if (displays.length === 1) {
+        let { bounds } = displays[0];
+        if (
+          x < bounds.x ||
+          x > bounds.x + bounds.width - 50 ||
+          y < bounds.y ||
+          y > bounds.y + bounds.height - 50
+        ) {
+          isResetWindiw = true;
+        }
+      } else {
+        isResetWindiw = true;
+        for (let i = 0; i < displays.length; i++) {
+          let { bounds } = displays[i];
+          if (
+            x > bounds.x &&
+            x < bounds.x + bounds.width &&
+            y > bounds.y &&
+            y < bounds.y - bounds.height
+          ) {
+            // 检测到APP窗口当前处于一个可用的屏幕里，break
+            isResetWindiw = false;
+            break;
+          }
+        }
+      }
+
+      if (!isResetWindiw) {
+        options.x = x;
+        options.y = y;
+      }
     }
 
     this.window = new BrowserWindow(options);
@@ -261,6 +297,7 @@ class Background {
     this.window.once('ready-to-show', () => {
       log('window ready-to-show event');
       this.window.show();
+      this.store.set('window', this.window.getBounds());
     });
 
     this.window.on('close', e => {
@@ -294,6 +331,14 @@ class Background {
 
     this.window.on('moved', () => {
       this.store.set('window', this.window.getBounds());
+    });
+
+    this.window.on('maximize', () => {
+      this.window.webContents.send('isMaximized', true);
+    });
+
+    this.window.on('unmaximize', () => {
+      this.window.webContents.send('isMaximized', false);
     });
 
     this.window.webContents.on('new-window', function (e, url) {
@@ -374,6 +419,21 @@ class Background {
       // register global shortcuts
       if (this.store.get('settings.enableGlobalShortcut') !== false) {
         registerGlobalShortcut(this.window, this.store);
+      }
+
+      // try to start osdlyrics process on start
+      if (this.store.get('settings.enableOsdlyricsSupport')) {
+        await createDbus(this.window);
+        log('try to start osdlyrics process');
+        const osdlyricsProcess = spawn('osdlyrics');
+
+        osdlyricsProcess.on('error', err => {
+          log(`failed to start osdlyrics: ${err.message}`);
+        });
+
+        osdlyricsProcess.on('exit', (code, signal) => {
+          log(`osdlyrics process exited with code ${code}, signal ${signal}`);
+        });
       }
 
       // create mpris

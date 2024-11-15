@@ -7,16 +7,19 @@
       <div class="title">{{ $t('login.loginText') }}</div>
       <div class="section-2">
         <div v-show="mode === 'phone'" class="input-box">
-          <div class="container" :class="{ active: inputFocus === 'phone' }">
+          <div
+            class="container"
+            :class="{ active: ['phone', 'countryCode'].includes(inputFocus) }"
+          >
             <svg-icon icon-class="mobile" />
             <div class="inputs">
               <input
                 id="countryCode"
                 v-model="countryCode"
                 :placeholder="
-                  inputFocus === 'phone' ? '' : $t('login.countryCode')
+                  inputFocus === 'countryCode' ? '' : $t('login.countryCode')
                 "
-                @focus="inputFocus = 'phone'"
+                @focus="inputFocus = 'countryCode'"
                 @blur="inputFocus = ''"
                 @keyup.enter="login"
               />
@@ -68,8 +71,8 @@
         </div>
 
         <div v-show="mode == 'qrCode'">
-          <div v-show="qrCodeImage" class="qr-code-container">
-            <img :src="qrCodeImage" />
+          <div v-show="qrCodeSvg" class="qr-code-container">
+            <img :src="qrCodeSvg" loading="lazy" />
           </div>
           <div class="qr-code-info">
             {{ qrCodeInformation }}
@@ -135,7 +138,7 @@ export default {
       smsCode: '',
       inputFocus: '',
       qrCodeKey: '',
-      qrCodeImage: '',
+      qrCodeSvg: '',
       qrCodeCheckInterval: null,
       qrCodeInformation: '打开网易云音乐APP扫码登录',
     };
@@ -233,7 +236,7 @@ export default {
       return loginQrCodeKey().then(result => {
         if (result.code === 200) {
           this.qrCodeKey = result.data.unikey;
-          QRCode.toDataURL(
+          QRCode.toString(
             `https://music.163.com/login?codekey=${this.qrCodeKey}`,
             {
               width: 192,
@@ -242,10 +245,13 @@ export default {
                 dark: '#335eea',
                 light: '#00000000',
               },
+              type: 'svg',
             }
           )
-            .then(url => {
-              this.qrCodeImage = url;
+            .then(svg => {
+              this.qrCodeSvg = `data:image/svg+xml;utf8,${encodeURIComponent(
+                svg
+              )}`;
             })
             .catch(err => {
               console.error(err);
@@ -258,6 +264,8 @@ export default {
       });
     },
     checkQrCodeLogin() {
+      // 清除二维码检测
+      clearInterval(this.qrCodeCheckInterval);
       this.qrCodeCheckInterval = setInterval(() => {
         if (this.qrCodeKey === '') return;
         loginQrCodeCheck(this.qrCodeKey).then(result => {
@@ -272,7 +280,7 @@ export default {
             clearInterval(this.qrCodeCheckInterval);
             this.qrCodeInformation = '登录成功，请稍等...';
             result.code = 200;
-            result.cookie = result.cookie.replace('HTTPOnly', '');
+            result.cookie = result.cookie.replaceAll(' HTTPOnly', '');
             this.handleLoginResponse(result);
           }
         });
